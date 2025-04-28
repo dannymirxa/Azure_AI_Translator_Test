@@ -136,14 +136,43 @@ class Translator:
         # Concatenate all the mini-batches.
         final_df = pl.concat(output_dfs)
         return final_df
+    
+
 
 if __name__ == "__main__":
     translator_instance = Translator(
-        input_path="./text-zh-large.csv",
-        output_path="./text-zh-large_translated.parquet",
+        input_path="./text-zh-simplified.csv",
+        output_path="./text-zh-simplified_translated.parquet",
         mini_batch_size=10  # Set your desired mini-batch size here.
     )
 
     # Process the translation for the 'review' column using our explicit mini-batch approach.
     processed_df: pl.DataFrame = translator_instance.process_translation_lazy(column="review")
-    processed_df.write_parquet(translator_instance.output_path)
+    # processed_df.write_parquet(translator_instance.output_path)
+    # for index, row in processed_df.iter_rows():
+
+    # def split_df(self, df: pd.DataFrame) -> pd.DataFrame:
+
+    texts= 'Zhuangyuanlou Hotel went for the first time, because of the geographical location: in Ningbo City and Yi Avenue high, big, on, inside the decoration of Chinese, the dish is authentic Ningbo cuisine, the taste is pure, drunk mud snail is particularly good, eat the taste of childhood, because I went late, waited in the lobby for a while, during which there is tea to drink, the waiter also chats with you, to the dining business is too good, the waiter is trotting, the service attitude is absolutely not speedy, everything is in place, the drink is also patiently explained to us, so it is absolutely necessary to boast, In particular, Peng Xinxing and Hong Jihua (only know the name by looking at the service card) also add color to our image of Ningbo, the champion building is a window in Ningbo, and the quality of the waiter reflects the spiritual outlook of our Ningbo people. Like one'
+    length= [
+                623,
+                261,
+                8
+            ]
+
+    def split_text_by_lengths(text, lengths):
+        sentences = []
+        start = 0
+
+        for length in lengths:
+            # Slice the string from the current start index to the next "start+length"
+            sentences.append(text[start:start+length].strip())
+            start += length
+        return sentences
+
+    # print(split_text_by_lengths(texts, length))
+
+    print(processed_df.with_columns(pl.col("translated_text").map_elements(lambda text: split_text_by_lengths(text, processed_df["translated_text_length"])).alias("split_texts")))
+
+
+    # print(pl.DataFrame(new_rows))
