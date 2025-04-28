@@ -161,9 +161,17 @@ class Translator():
     def split_text(self, text: str, lengths: List[int]) -> List[str]:
         sentences = []
         start = 0
-        for length in lengths:
-            sentences.append(text[start:start+length])
-            start += length
+        for i, length in enumerate(lengths):
+            end = min(start + length, len(text))
+            if i < len(lengths) - 1: # For all segments except the last
+                while end > start and text[end-1] != ' ':
+                    end -= 1
+                if end == start:
+                    end = min(start + length, len(text)) # Force split if no space found
+            else:
+                end = len(text) # For the last segment, just take the rest of the text
+            sentences.append(text[start:end].strip())
+            start = end
         return sentences
     
     def split_sentences_into_rows(self, df: pl.DataFrame, source_split_column: str, translated_split_column: str) -> pl.DataFrame:
