@@ -18,7 +18,7 @@ path = "/translate"
 constructed_url = endpoint + path
 
 class Translator:
-    def __init__(self, input_path: str, output_path: str, mini_batch_size: int = 200):
+    def __init__(self, input_path: str, output_path: str, mini_batch_size: int = 100):
         self.input_path = input_path
         self.output_path = output_path
         self.mini_batch_size = mini_batch_size  # Number of rows per mini-batch
