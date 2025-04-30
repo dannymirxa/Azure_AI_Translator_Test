@@ -206,6 +206,8 @@ if __name__=="__main__":
         pl.struct(["translated_text", "translated_text_length"]).map_elements(lambda row: translator_instance.split_text(row["translated_text"], row["translated_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("translated_split_texts")
     ])
 
+    processed_df.write_parquet("./'text-zh-simplified_translated.parquet")
+
     final_df = translator_instance.split_sentences_into_rows(processed_df, "source_split_texts", "translated_split_texts")
     
     final_df.write_csv('text-zh-simplified_translated_split.csv')
