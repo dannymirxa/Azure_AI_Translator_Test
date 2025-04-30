@@ -66,9 +66,11 @@ class Translator():
              print("No non-null texts found to translate.")
              # Return two series of the same length as input, filled with nulls/defaults
              translated_texts = [None] * len(s)
-             lengths = [[0]] * len(s) # Use [[0]] to match the List[int] type hint
+             source_lengths = [[0]] * len(s) # Use [[0]] to match the List[int] type hint
+             translated_lengths = [[0]] * len(s) # Use [[0]] to match the List[int] type hint
              return pl.Series("translated_text", translated_texts, dtype=pl.String), \
-                    pl.Series("translated_text_length", lengths, dtype=pl.List(pl.Int64))
+                    pl.Series("source_text_length", source_lengths, dtype=pl.List(pl.Int64)),\
+                    pl.Series("translated_text_length", translated_lengths, dtype=pl.List(pl.Int64))
 
 
         # 2. Make the vectorized API request
@@ -92,8 +94,9 @@ class Translator():
 
             # 3. Process the API response and map back to original indices
             translated_texts = [None] * len(s) # Initialize with None for nulls
+            source_lengths: List[List[int]] = [[0]] * len(s)
             # Initialize lengths with default list [0] for nulls/errors
-            lengths: List[List[int]] = [[0]] * len(s)
+            translated_lengths: List[List[int]] = [[0]] * len(s)
 
             # The response list order should match the request_data order
             for api_response_index, item in enumerate(response):
@@ -102,12 +105,14 @@ class Translator():
                     # Extract text and lengths from the response item
                     # Assuming translation[0] is the target language specified in 'to' list [0]
                     translated_text = item['translations'][0]['text']
+                    source_text_length = item['translations'][0]['sentLen']['srcSentLen']
                     # 'sentLen' is expected to be a dictionary with 'transSentLen' as a list of ints
                     translated_length = item['translations'][0]['sentLen']['transSentLen']
 
                     # Store results at the correct original index
                     translated_texts[original_idx] = translated_text
-                    lengths[original_idx] = translated_length
+                    source_lengths[original_idx] = source_text_length
+                    translated_lengths[original_idx] = translated_length
 
                 except (IndexError, KeyError, TypeError) as e:
                     # Handle cases where an individual response item is malformed
@@ -119,13 +124,15 @@ class Translator():
             print(f"Error during vectorized translation API call: {e}")
             # In case of a request error, all results will be None/[0] (initialized state)
             translated_texts = [None] * len(s)
-            lengths = [[0]] * len(s)
+            source_lengths = [[0]] * len(s)
+            translated_lengths = [[0]] * len(s)
 
         # 4. Create Polars Series from the results
         translated_text_series = pl.Series("translated_text", translated_texts, dtype=pl.String) # Use pl.String for nullable strings
-        translated_length_series = pl.Series("translated_text_length", lengths, dtype=pl.List(pl.Int64))
+        source_length_series = pl.Series("source_text_length", source_lengths, dtype=pl.List(pl.Int64))
+        translated_length_series = pl.Series("translated_text_length", translated_lengths, dtype=pl.List(pl.Int64))
 
-        return translated_text_series, translated_length_series
+        return translated_text_series, source_length_series, translated_length_series
 
 
     def process_translation(self, column: str) -> pl.DataFrame:
@@ -139,16 +146,44 @@ class Translator():
             raise ValueError(f"DataFrame must contain a {column} column.")
 
         # print(f"Translating {column} column...")
-        translated_text_series, translated_length_series = self.translate_series(df[column])
+        translated_text_series, source_length_series, translated_length_series = self.translate_series(df[column])
 
         # Add the new columns to the DataFrame
         df = df.with_columns([
             translated_text_series,
+            source_length_series,
             translated_length_series
         ])
 
         # print("Translation complete. Added 'translated_text' and 'translated_text_length' columns.")
         return df
+    
+    def split_text(self, text: str, lengths: List[int]) -> List[str]:
+        sentences = []
+        start = 0
+        for i, length in enumerate(lengths):
+            end = min(start + length, len(text))
+            if i < len(lengths) - 1: # For all segments except the last
+                while end > start and text[end-1] != ' ':
+                    end -= 1
+                if end == start:
+                    end = min(start + length, len(text)) # Force split if no space found
+            else:
+                end = len(text) # For the last segment, just take the rest of the text
+            sentences.append(text[start:end].strip())
+            start = end
+        return sentences
+    
+    def split_sentences_into_rows(self, df: pl.DataFrame, source_split_column: str, translated_split_column: str) -> pl.DataFrame:
+        new_rows= []
+        for row in df.head(5).iter_rows(named=True):
+            sentence_index = 0
+            for source_sentence, translated_sentence in zip(row[source_split_column], row[translated_split_column]):
+                if source_sentence.strip():
+                    new_rows.append({"id": row["id"], "sentence_index": sentence_index, "source_text": source_sentence, "translated_text": translated_sentence})
+                    sentence_index += 1
+        return pl.DataFrame(new_rows)
+
 
 if __name__=="__main__":
     # Instantiate the Translator
@@ -161,4 +196,23 @@ if __name__=="__main__":
     # processed_df.with_columns(
     #     processed_df['translated_text_length'].list.eval(pl.element().cast(pl.String)).list.join(",").alias("translated_text_length_str")
     # ).write_csv("./text-zh-simplified_translated.csv")
-    processed_df.write_parquet("./text-zh-simplified_translated.parquet")
+    
+    # Apply the function to create a new column with split texts
+    processed_df = processed_df.with_columns([
+        pl.struct(["review", "source_text_length"]).map_elements(lambda row: translator_instance.split_text(row["review"], row["source_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("source_split_texts")
+    ])
+
+    processed_df = processed_df.with_columns([
+        pl.struct(["translated_text", "translated_text_length"]).map_elements(lambda row: translator_instance.split_text(row["translated_text"], row["translated_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("translated_split_texts")
+    ])
+
+    final_df = translator_instance.split_sentences_into_rows(processed_df, "source_split_texts", "translated_split_texts")
+    
+    final_df.write_csv('text-zh-simplified_translated_split.csv')
+    # print(processed_df)
+    # for rows in processed_df
+
+    # processed_df.write_parquet("./text-zh-simplified_translated.parquet")
+    # print(split_text_by_lengths(texts, length))
+
+    # print(processed_df.with_columns(pl.col("translated_text").map_elements(lambda text: split_text_by_lengths(text, processed_df["translated_text_length"])).alias("split_texts")))
