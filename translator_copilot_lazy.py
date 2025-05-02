@@ -18,9 +18,8 @@ path = "/translate"
 constructed_url = endpoint + path
 
 class Translator:
-    def __init__(self, input_path: str, output_path: str, mini_batch_size: int = 100):
+    def __init__(self, input_path: str, mini_batch_size: int = 100):
         self.input_path = input_path
-        self.output_path = output_path
         self.mini_batch_size = mini_batch_size  # Number of rows per mini-batch
 
     def translate_series(self, s: pl.Series, translate_to_language: List[str] = ['en']) -> Tuple[pl.Series, pl.Series]:
@@ -105,15 +104,16 @@ class Translator:
         the LazyFrame into mini-batches to throttle API calls.
         """
         # Create a LazyFrame by lazily scanning the CSV.
-        lf = pl.scan_csv(self.input_path)
+        # Only selects respondent id and comments columns
+        lf = pl.scan_csv(self.input_path).select(["respondent id", "comments"])
 
         # First, determine total row count without fully materializing data.
         total_rows = lf.select(pl.len()).collect().item()
 
         # Define the new schema (your CSV might contain other columns; adjust as needed).
         new_schema = {
-            "id": pl.Int64,
-            "review": pl.Utf8,
+            "respondent id": pl.Int64,
+            "comments": pl.Utf8,
             "translated_text": pl.Utf8,
             "source_text_length": pl.List(pl.Int64),
             "translated_text_length": pl.List(pl.Int64)
@@ -168,35 +168,29 @@ class Translator:
             sentence_index = 0
             for source_sentence, translated_sentence in zip(row[source_split_column], row[translated_split_column]):
                 if source_sentence.strip():
-                    new_rows.append({"id": row["id"], "sentence_index": sentence_index, "source_text": source_sentence, "translated_text": translated_sentence})
+                    new_rows.append({"respondent_id": row["respondent id"], "sentence_index": sentence_index, "source_text": source_sentence, "translated_text": translated_sentence})
                     sentence_index += 1
         return pl.DataFrame(new_rows)
 
 
 if __name__ == "__main__":
+    file="Infinitas SEP 2023- text comments"
+
     translator_instance = Translator(
-        input_path="./text-zh-large.csv",
-        output_path="./text-zh-large_translated.parquet",
-        mini_batch_size=10  # Set your desired mini-batch size here.
+        input_path=f"./data/src/{file}.csv",
+        mini_batch_size=100  # Set your desired mini-batch size here.
     )
 
-    # Process the translation for the 'review' column using our explicit mini-batch approach.
-    processed_df =  translator_instance.process_translation_lazy(column="review")
-    # processed_df.write_parquet(translator_instance.output_path)
-    # for index, row in processed_df.iter_rows():
-
-    # def split_df(self, df: pd.DataFrame) -> pd.DataFrame:
-    # print(processed_df)
-    processed_df = processed_df.with_columns([
-        pl.struct(["review", "source_text_length"]).map_elements(lambda row: translator_instance.split_text(row["review"], row["source_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("source_split_texts")
-    ])
+    # Process the translation for the 'comments' column using our explicit mini-batch approach.
+    processed_df =  translator_instance.process_translation_lazy(column="comments")
 
     processed_df = processed_df.with_columns([
-        pl.struct(["translated_text", "translated_text_length"]).map_elements(lambda row: translator_instance.split_text(row["translated_text"], row["translated_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("translated_split_texts")
-    ])
+                    pl.struct(["comments", "source_text_length"]).map_elements(lambda row: translator_instance.split_text(row["comments"], row["source_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("source_split_texts")
+                ]).with_columns([
+                    pl.struct(["translated_text", "translated_text_length"]).map_elements(lambda row: translator_instance.split_text(row["translated_text"], row["translated_text_length"]), return_dtype=pl.List(pl.Utf8)).alias("translated_split_texts")
+                ])
 
-    processed_df.write_parquet("./text-zh-large_translated_lazy.parquet")
+    processed_df.write_parquet(f"./data/prod/{file}-simplified_translated_lazy.parquet")
 
     final_df = translator_instance.split_sentences_into_rows(processed_df, "source_split_texts", "translated_split_texts")
-    # print(final_df)
-    final_df.write_parquet("./text-zh-large_translated_split_lazy.parquet")
+    final_df.write_parquet(f"./data/prod/{file}-simplified_translated_split_lazy.parquet")
