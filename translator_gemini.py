@@ -176,7 +176,7 @@ class Translator():
     
     def split_sentences_into_rows(self, df: pl.DataFrame, source_split_column: str, translated_split_column: str) -> pl.DataFrame:
         new_rows= []
-        for row in df.head(5).iter_rows(named=True):
+        for row in df.iter_rows(named=True):
             sentence_index = 0
             for source_sentence, translated_sentence in zip(row[source_split_column], row[translated_split_column]):
                 if source_sentence.strip():
