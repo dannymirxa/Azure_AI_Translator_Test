@@ -24,7 +24,7 @@ class Translator():
 
     def create_df(self) -> pl.DataFrame:
         """Reads the input CSV file into a Polars DataFrame."""
-        df = pl.read_csv(self.input_path).select(["respondent id", "comments"])
+        df = pl.read_csv(self.input_path)
         return df
 
     def translate_series(self, s: pl.Series, translate_to_language: List[str] = ['en']) -> Tuple[pl.Series, pl.Series]:
