@@ -6,6 +6,7 @@ debugpy==1.8.14
 decorator==5.2.1
 exceptiongroup==1.2.2
 executing==2.2.0
+fastexcel==0.14.0
 idna==3.10
 importlib_metadata==8.6.1
 ipykernel==6.29.5
